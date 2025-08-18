@@ -1,8 +1,9 @@
+import io
 import sys
 
 import uvicorn
 from PyPDF2 import PdfReader
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from pydantic import BaseModel
 import requests
 import os
@@ -11,7 +12,8 @@ from starlette.middleware.cors import CORSMiddleware
 
 from config import Config
 from embeddings import DeepSeekEmbeddingFunction, GTESmallEmbeddingFunction
-from util import split_text_into_chunks, extract_text_from_pdf, smart_chunking
+from util import split_text_into_chunks, extract_text_from_pdf, smart_chunking, extract_text_from_fb2, \
+    extract_text_from_epub
 
 os.environ.update({"DEEPSEEK_API_KEY": "sk-011533b41d13463d98a3e558896665b8"})
 
@@ -28,7 +30,6 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
-
 
 
 # ChromaDB
@@ -128,13 +129,68 @@ async def ask_choma(query: Query):
     }
 
 
-@app.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
-    try:
-        # Extract and clean text
-        full_text = await extract_text_from_pdf(file)
+# @app.post("/upload-pdf")
+# async def upload_pdf(file: UploadFile = File(...)):
+#     try:
+#         # Extract and clean text
+#         full_text = await extract_text_from_pdf(file)
+#
+#         # Split into meaningful chunks
+#         chunks = smart_chunking(full_text)
+#
+#         # Prepare for ChromaDB
+#         documents = []
+#         metadatas = []
+#         ids = []
+#
+#         for i, chunk in enumerate(chunks):
+#             documents.append(chunk['text'])
+#             metadatas.append({
+#                 'source': str(file.filename),
+#                 'chunk_num': int(i),
+#                 **chunk['metadata']
+#             })
+#             ids.append(f"{file.filename}_chunk_{i}")
+#
+#         # Store in ChromaDB
+#         collection.add(
+#             documents=documents,
+#             metadatas=metadatas,
+#             ids=ids
+#         )
+#
+#         return {
+#             "status": "success",
+#             "chunks_created": len(chunks),
+#             "sample_chunk": {
+#                 "text": chunks[0]['text'][:500] + "..." if chunks else None,
+#                 "length": len(chunks[0]['text']) if chunks else 0
+#             }
+#         }
+#
+#     except Exception as e:
+#         return {"status": "error", "message": str(e)}
 
-        # Split into meaningful chunks
+
+@app.post("/upload-pdf")
+async def upload_document(file: UploadFile = File(...)):
+    try:
+        file_content = await file.read()
+        file_extension = file.filename.split('.')[-1].lower()
+
+        if file_extension == 'pdf':
+            full_text = await extract_text_from_pdf(io.BytesIO(file_content))
+        elif file_extension == 'fb2':
+            full_text = extract_text_from_fb2(file_content)
+        elif file_extension == 'epub':
+            full_text = extract_text_from_epub(file_content)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file format. Supported formats: PDF, FB2, EPUB"
+            )
+
+        # Split into meaningful chunks (using your existing function)
         chunks = smart_chunking(full_text)
 
         # Prepare for ChromaDB

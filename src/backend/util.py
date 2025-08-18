@@ -1,4 +1,5 @@
 import io
+import os
 from typing import List, Tuple, Dict
 import re
 from datetime import datetime
@@ -6,6 +7,11 @@ from datetime import datetime
 import pdfplumber
 from PyPDF2 import PdfReader
 from fastapi import UploadFile
+
+from ebooklib import epub
+from bs4 import BeautifulSoup
+import zipfile
+import xml.etree.ElementTree as ET
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 1000, overlap: int = 100) -> List[Dict]:
@@ -136,6 +142,28 @@ def smart_chunking(text: str, chunk_size: int = 1000, overlap: int = 200) -> Lis
     return chunks
 
 
+# import re
+#
+# def clean_text(text: str) -> str:
+#     # Убираем лишние пробелы и переносы строк внутри абзацев
+#     text = re.sub(r'[ \t]+', ' ', text)  # лишние пробелы
+#     text = re.sub(r'\n+', '\n', text)    # несколько переносов в один
+#     text = text.strip()
+#     return text
+#
+# def split_into_segments(text: str, max_chars: int = 1000):
+#     segments = []
+#     current = ""
+#     for line in text.split('\n'):
+#         if len(current) + len(line) > max_chars:
+#             segments.append(current.strip())
+#             current = ""
+#         current += line + ' '
+#     if current:
+#         segments.append(current.strip())
+#     return segments
+
+
 async def extract_text_from_pdf(file) -> str:
     """Extract text from PDFs with text layers only (no OCR)"""
     pdf_content = await file.read()
@@ -150,6 +178,86 @@ async def extract_text_from_pdf(file) -> str:
             full_text += f"\nPAGE {page_num}\n{text}\n"
 
     return full_text
+
+
+def extract_text_from_fb2(file_content: bytes) -> str:
+    """Extract text from FB2 (FictionBook) format."""
+    try:
+        root = ET.fromstring(file_content)
+        # FB2 namespace might be present
+        ns = {'fb2': 'http://www.gribuser.ru/xml/fictionbook/2.0'}
+
+        # Find all text sections
+        bodies = root.findall('.//fb2:body', ns) or root.findall('.//body')
+        text_parts = []
+
+        for body in bodies:
+            # Extract all paragraphs
+            paragraphs = body.findall('.//fb2:p', ns) or body.findall('.//p')
+            for p in paragraphs:
+                if p.text:
+                    text_parts.append(p.text)
+                # Handle mixed content
+                text_parts.append(''.join(p.itertext()))
+
+        return '\n\n'.join(text_parts)
+    except ET.ParseError as e:
+        raise ValueError(f"Failed to parse FB2 file: {str(e)}")
+
+
+def extract_text_from_epub(file_content: bytes) -> str:
+    """Extract text from EPUB format."""
+    try:
+        # EPUB is essentially a zip file with XHTML content
+        with zipfile.ZipFile(io.BytesIO(file_content)) as z:
+            # Parse the container to find the root file
+            with z.open('META-INF/container.xml') as container_file:
+                container = ET.fromstring(container_file.read())
+                rootfile_path = container.find(
+                    './/{urn:oasis:names:tc:opendocument:xmlns:container}rootfile'
+                ).attrib['full-path']
+
+            # Parse the root file to find all documents
+            with z.open(rootfile_path) as root_file:
+                root_content = root_file.read()
+                root = ET.fromstring(root_content)
+
+                # Get the manifest items (all content files)
+                manifest = root.find(
+                    './/{http://www.idpf.org/2007/opf}manifest'
+                )
+                items = {
+                    item.attrib['id']: item.attrib['href']
+                    for item in manifest.findall(
+                        '{http://www.idpf.org/2007/opf}item'
+                    )
+                }
+
+                # Find the spine (reading order)
+                spine = root.find('.//{http://www.idpf.org/2007/opf}spine')
+                itemrefs = spine.findall('{http://www.idpf.org/2007/opf}itemref')
+
+                text_parts = []
+
+                for itemref in itemrefs:
+                    item_id = itemref.attrib['idref']
+                    item_path = items[item_id]
+
+                    # Resolve path relative to root file
+                    full_path = os.path.join(
+                        os.path.dirname(rootfile_path),
+                        item_path
+                    )
+
+                    # Read and parse each content file
+                    with z.open(full_path) as content_file:
+                        content = content_file.read()
+                        soup = BeautifulSoup(content, 'html.parser')
+                        text_parts.append(soup.get_text())
+
+                return '\n\n'.join(text_parts)
+    except Exception as e:
+        raise ValueError(f"Failed to parse EPUB file: {str(e)}")
 
 
 # async def extract_text_from_pdf(file) -> str:
