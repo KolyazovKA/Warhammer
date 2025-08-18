@@ -1,0 +1,15 @@
+version: "3"
+services:
+  wh-frontend:
+    container_name: wh-frontend
+    build:
+      dockerfile: docker/WH.Frontend.Dockerfile
+    ports:
+      - "8080:80"
+  
+  wh-backend:
+    container_name: wh-backend
+    build:
+      dockerfile: docker/WH.Backend.Dockerfile
+    ports:
+      - "8081:8081"
