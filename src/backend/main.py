@@ -10,8 +10,8 @@ from chromadb import PersistentClient
 
 
 from config import Config
-from embeddings import DeepSeekEmbeddingFunction
-from util import split_text_into_chunks
+from embeddings import DeepSeekEmbeddingFunction, GTESmallEmbeddingFunction
+from util import split_text_into_chunks, extract_text_from_pdf, smart_chunking
 
 os.environ.update({"DEEPSEEK_API_KEY": "sk-011533b41d13463d98a3e558896665b8"})
 
@@ -22,12 +22,17 @@ app = FastAPI(title="DeepSeek RAG over Choma")
 
 # ChromaDB
 client = PersistentClient(path="choma_db")
+
+#gte_embedder = GTESmallEmbeddingFunction()
 embedding_func = DeepSeekEmbeddingFunction(api_key=DEEPSEEK_API_KEY)
+# collection = client.get_or_create_collection(
+#     name="gte_collection",
+#     embedding_function=gte_embedder
+# )
 collection = client.get_or_create_collection(
     name="choma_collection",
-    embedding_function=embedding_func
+    embedding_function=embedding_func,
 )
-
 class Query(BaseModel):
     question: str
 
@@ -56,8 +61,8 @@ async def ask_choma(query: Query):
 
         # Format metadata for display
         source_info = f"Source: {metadata['source']}"
-        page_info = f"Pages: {', '.join(map(str, metadata['pages']))}" if metadata['pages'] else ""
-        date_info = f"Dates: {', '.join(metadata['dates'])}" if metadata['dates'] else ""
+        page_info = f"Pages: {', '.join(map(str, metadata['pages']))}" if 'pages' in metadata else ""
+        date_info = f"Dates: {', '.join(metadata['dates'])}" if 'dates' in metadata else ""
 
         context_chunks.append(
         f"{chunk_text}\n\n{source_info}\n{page_info}\n{date_info}"
@@ -67,13 +72,13 @@ async def ask_choma(query: Query):
 
         # 2. Form the prompt
     prompt = f"""
-Ты ассистент, отвечающий только на основе базы Choma.
+Ты ассистент, отвечающий только на основе базы Chroma.
 Вот найденная информация с метаданными (источник, страницы, даты):
 {context_text}
 
 Вопрос: {query.question}
 
-Если ответа нет в информации выше, скажи "Не найдено в базе Choma".
+Если ответа нет в информации выше, скажи "Не найдено в базе Chroma".
 Если отвечаешь, укажи источник и страницы, откуда взята информация.
 """
 
@@ -83,10 +88,10 @@ async def ask_choma(query: Query):
         "model": "deepseek-chat",
         "messages": [
             {"role": "system",
-             "content": "Ты помощник для поиска по базе Choma. Всегда указывай источник информации."},
+             "content": "Ты помощник для поиска по базе Chroma. Всегда указывай источник информации."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2
+        "temperature": 0.8
     }
 
     resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload)
@@ -114,57 +119,45 @@ async def ask_choma(query: Query):
 
 @app.post("/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
-    # Save PDF temporarily
-    with open("temp.pdf", "wb") as f:
-        f.write(await file.read())
+    try:
+        # Extract and clean text
+        full_text = await extract_text_from_pdf(file)
 
-    # Extract text using PyPDF2
-    reader = PdfReader("temp.pdf")
-    full_text = ""
-    page_texts = []
+        # Split into meaningful chunks
+        chunks = smart_chunking(full_text)
 
-    for page_num, page in enumerate(reader.pages, start=1):
-        page_content = page.extract_text() or ""
-        # Add page number marker
-        page_content = f"\nPAGE {page_num}\n{page_content}"
-        page_texts.append(page_content)
-        full_text += page_content + "\n"
+        # Prepare for ChromaDB
+        documents = []
+        metadatas = []
+        ids = []
 
-    # Split into chunks with metadata
-    chunks = split_text_into_chunks(full_text)
+        for i, chunk in enumerate(chunks):
+            documents.append(chunk['text'])
+            metadatas.append({
+                'source': str(file.filename),
+                'chunk_num': int(i),
+                **chunk['metadata']
+            })
+            ids.append(f"{file.filename}_chunk_{i}")
 
-    # Prepare documents and metadata for ChromaDB
-    documents = []
-    metadatas = []
-    ids = []
+        # Store in ChromaDB
+        collection.add(
+            documents=documents,
+            metadatas=metadatas,
+            ids=ids
+        )
 
-    for i, chunk in enumerate(chunks):
-        documents.append(chunk['text'])
+        return {
+            "status": "success",
+            "chunks_created": len(chunks),
+            "sample_chunk": {
+                "text": chunks[0]['text'][:500] + "..." if chunks else None,
+                "length": len(chunks[0]['text']) if chunks else 0
+            }
+        }
 
-        # Convert metadata to ChromaDB-compatible format
-        pages_str = ",".join(map(str, chunk['metadata']['pages'])) if chunk['metadata']['pages'] else ""
-        dates_str = ",".join(chunk['metadata']['dates']) if chunk['metadata']['dates'] else ""
-
-        metadatas.append({
-            'source': str(file.filename),
-            'pages': str(pages_str),  # Ensure string type
-            'dates': str(dates_str),  # Ensure string type
-            'chunk_num': int(i)  # Ensure integer type
-        })
-        ids.append(f"{file.filename}_chunk_{i}")
-
-    # Store in ChromaDB
-    collection.add(
-        documents=documents,
-        metadatas=metadatas,
-        ids=ids
-    )
-
-    return {
-        "status": "success",
-        "chunks_created": len(chunks),
-        "sample_chunk": chunks[0] if chunks else None
-    }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":

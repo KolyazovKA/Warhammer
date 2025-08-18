@@ -1,6 +1,11 @@
+import io
 from typing import List, Tuple, Dict
 import re
 from datetime import datetime
+
+import pdfplumber
+from PyPDF2 import PdfReader
+from fastapi import UploadFile
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 1000, overlap: int = 100) -> List[Dict]:
@@ -80,3 +85,96 @@ def split_text_into_chunks(text: str, chunk_size: int = 1000, overlap: int = 100
         start = end - overlap
 
     return chunks
+
+
+def clean_text(text: str) -> str:
+    """Clean extracted text by removing excessive whitespace and formatting artifacts"""
+    # Normalize all whitespace sequences to single spaces
+    text = re.sub(r'\s+', ' ', text)
+    # Remove leading/trailing whitespace
+    text = text.strip()
+    # Fix common PDF extraction artifacts
+    text = re.sub(r'(?<=\w)-\s+(?=\w)', '', text)  # Join hyphenated words
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)  # Fix punctuation spacing
+    return text
+
+
+def smart_chunking(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[Dict]:
+    """Split text into meaningful chunks respecting sentence boundaries"""
+    sentences = re.split(r'(?<=[.!?])\s+', text)  # Split on sentence boundaries
+    chunks = []
+    current_chunk = []
+    current_length = 0
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        sentence_length = len(sentence)
+
+        # If adding this sentence would exceed chunk size (with some tolerance)
+        if current_chunk and current_length + sentence_length > chunk_size:
+            chunks.append({
+                'text': ' '.join(current_chunk),
+                'metadata': {'chunk_type': 'natural_break'}
+            })
+            # Keep overlap sentences for context
+            current_chunk = current_chunk[-overlap // 50:] if overlap else []
+            current_length = sum(len(s) for s in current_chunk)
+
+        current_chunk.append(sentence)
+        current_length += sentence_length
+
+    # Add the last chunk if it has content
+    if current_chunk:
+        chunks.append({
+            'text': ' '.join(current_chunk),
+            'metadata': {'chunk_type': 'natural_break'}
+        })
+
+    return chunks
+
+
+async def extract_text_from_pdf(file) -> str:
+    """Extract text from PDFs with text layers only (no OCR)"""
+    pdf_content = await file.read()
+    full_text = ""
+
+    # Option A: Using pypdf (most lightweight)
+    reader = PdfReader(io.BytesIO(pdf_content))
+    for page_num, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        text = clean_text(text)
+        if text:
+            full_text += f"\nPAGE {page_num}\n{text}\n"
+
+    return full_text
+
+
+# async def extract_text_from_pdf(file) -> str:
+#     """Improved PDF text extraction with layout preservation"""
+#     pdf_content = await file.read()
+#     full_text = ""
+#
+#     with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+#         for page in pdf.pages:
+#             # Extract text with careful layout handling
+#             text = page.extract_text(
+#                 layout=True,
+#                 x_tolerance=2,
+#                 y_tolerance=2,
+#                 keep_blank_chars=False,
+#                 use_text_flow=True
+#             ) or ""
+#
+#             # Clean and add page separator
+#             text = clean_text(text)
+#             if text:
+#                 full_text += f"\nPAGE {page.page_number}\n{text}\n"
+#
+#     return full_text
+#
+
+
+
