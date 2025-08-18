@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import requests
 import os
 from chromadb import PersistentClient
-
+from starlette.middleware.cors import CORSMiddleware
 
 from config import Config
 from embeddings import DeepSeekEmbeddingFunction, GTESmallEmbeddingFunction
@@ -19,6 +19,17 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
 app = FastAPI(title="DeepSeek RAG over Choma")
+
+# Set up CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+
+
 
 # ChromaDB
 client = PersistentClient(path="choma_db")
@@ -46,7 +57,7 @@ async def ask_choma(query: Query):
     # 1. Search in ChromaDB with metadata filtering if needed
     results = collection.query(
         query_texts=[query.question],
-        n_results=3,
+        n_results=15,
         # You can add metadata filters here if needed
         # where={"metadata_field": {"$eq": "value"}}
     )
