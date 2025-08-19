@@ -1,7 +1,12 @@
-import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
+import shutil
+from typing import Dict
+from chromadb import PersistentClient
+from urllib.parse import quote
 from starlette.middleware.cors import CORSMiddleware
 
 from config import Config
@@ -24,6 +29,8 @@ from api.documents.upload import router as upload_router
 
 app.include_router(chat_router)
 app.include_router(upload_router)
+# Монтируем статическую директорию для доступа к файлам
+app.mount("/files", StaticFiles(directory="src/backend/files"), name="files")
 
 class Query(BaseModel):
     question: str
@@ -35,7 +42,25 @@ async def search_chroma(query: Query):
     )
     return text_only_search_results
 
-
+@app.get("/get_books")
+async def get_books() -> Dict[str, str]:
+    # Путь к целевой папке
+    folder_path = 'src/backend/files'
+    
+    # Проверяем существование папки
+    if not os.path.exists(folder_path):
+        raise HTTPException(status_code=404, detail="Folder not found")
+    
+    # Собираем список файлов (игнорируем директории)
+    files = {}
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        if os.path.isfile(file_path):
+            # Кодируем имя файла для URL
+            encoded_filename = quote(filename)
+            files[filename] = f"http://localhost:8081/files/{encoded_filename}"
+    
+    return JSONResponse(content=files)
 
 if __name__ == "__main__":
     Chroma.initialize()
