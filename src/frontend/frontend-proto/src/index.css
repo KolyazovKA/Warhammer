@@ -69,6 +69,8 @@ body, html, #root {
   background: var(--card);
   backdrop-filter: blur(16px);
   animation: popIn 0.3s ease;
+  white-space: pre-wrap; /* Сохраняет переводы строк */
+  word-break: break-word;
 }
 .msg.user.right { align-self: flex-end; background: rgba(255,255,255,0.15); }
 .msg.assistant.left { align-self: flex-start; }

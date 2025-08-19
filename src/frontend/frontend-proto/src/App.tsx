@@ -16,9 +16,9 @@ type UploadItem = {
   error?: string;
 };
 
-const ASK_URL = "http://localhost:8081/ask";
-const ASK_QUICK_URL = "http://localhost:8081/ask-quick";
-const UPLOAD_URL = "http://localhost:8081/upload";
+const ASK_URL = "http://localhost:8081/api/chat/semantics";
+const ASK_QUICK_URL = "http://localhost:8081/api/chat/semantics";
+const UPLOAD_URL = "http://localhost:8081/api/documents/upload";
 const MAX_USER_QUERIES = 5;
 const MAX_FILES = 5;
 const MAX_TOTAL_SIZE = 60 * 1024 * 1024;
