@@ -1,7 +1,6 @@
 import io
 
 from PyPDF2 import PdfReader
-
 from util import clean_text
 
 
