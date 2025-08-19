@@ -172,7 +172,7 @@ async def ask_choma(query: Query):
 #         return {"status": "error", "message": str(e)}
 
 
-@app.post("/upload-pdf")
+@app.post("/upload")
 async def upload_document(file: UploadFile = File(...)):
     try:
         file_content = await file.read()
