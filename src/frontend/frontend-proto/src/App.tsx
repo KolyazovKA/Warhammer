@@ -170,7 +170,11 @@ export default function App() {
           form.append("file", f);
 
           const res = await fetch(UPLOAD_URL, { method: "POST", body: form });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (!res.ok) {
+            const errorMsg = res.status === 400 ? "Неподдерживаемый формат" : `Ошибка: HTTP ${res.status}`;
+            throw new Error(errorMsg);
+          }
+
           const data = await res.json();
           if (data?.status !== "success" && data?.status !== "ok") {
             throw new Error(data?.message || "Ошибка загрузки");
