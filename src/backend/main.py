@@ -1,8 +1,6 @@
 import io
-import sys
 
 import uvicorn
-from PyPDF2 import PdfReader
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from pydantic import BaseModel
 import requests
@@ -11,9 +9,9 @@ from chromadb import PersistentClient
 from starlette.middleware.cors import CORSMiddleware
 
 from config import Config
-from embeddings import DeepSeekEmbeddingFunction, GTESmallEmbeddingFunction
-from util import split_text_into_chunks, extract_text_from_pdf, smart_chunking, extract_text_from_fb2, \
-    extract_text_from_epub
+from embeddings import DeepSeekEmbeddingFunction
+from util import extract_text_from_pdf, smart_chunking, extract_text_from_fb2, \
+    extract_text_from_epub, extract_text_from_docx
 
 os.environ.update({"DEEPSEEK_API_KEY": "sk-011533b41d13463d98a3e558896665b8"})
 
@@ -134,47 +132,12 @@ Response: {str(resp)}
     }
 
 
-# @app.post("/upload-pdf")
-# async def upload_pdf(file: UploadFile = File(...)):
-#     try:
-#         # Extract and clean text
-#         full_text = await extract_text_from_pdf(file)
-#
-#         # Split into meaningful chunks
-#         chunks = smart_chunking(full_text)
-#
-#         # Prepare for ChromaDB
-#         documents = []
-#         metadatas = []
-#         ids = []
-#
-#         for i, chunk in enumerate(chunks):
-#             documents.append(chunk['text'])
-#             metadatas.append({
-#                 'source': str(file.filename),
-#                 'chunk_num': int(i),
-#                 **chunk['metadata']
-#             })
-#             ids.append(f"{file.filename}_chunk_{i}")
-#
-#         # Store in ChromaDB
-#         collection.add(
-#             documents=documents,
-#             metadatas=metadatas,
-#             ids=ids
-#         )
-#
-#         return {
-#             "status": "success",
-#             "chunks_created": len(chunks),
-#             "sample_chunk": {
-#                 "text": chunks[0]['text'][:500] + "..." if chunks else None,
-#                 "length": len(chunks[0]['text']) if chunks else 0
-#             }
-#         }
-#
-#     except Exception as e:
-#         return {"status": "error", "message": str(e)}
+@app.post("/search")
+async def search_chroma(query: Query):
+    text_only_search_results = collection.get(
+        where_document={"$contains": query.question},
+    )
+    return text_only_search_results
 
 
 @app.post("/upload")
@@ -189,6 +152,8 @@ async def upload_document(file: UploadFile = File(...)):
             full_text = extract_text_from_fb2(file_content)
         elif file_extension == 'epub':
             full_text = extract_text_from_epub(file_content)
+        elif file_extension == 'doc' or file_extension == 'docx':
+            full_text = extract_text_from_docx(file_content)
         else:
             raise HTTPException(
                 status_code=400,

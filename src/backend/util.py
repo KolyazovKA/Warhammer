@@ -3,6 +3,8 @@ import os
 from typing import List, Tuple, Dict
 import re
 from datetime import datetime
+import docx
+import ebooklib
 
 import pdfplumber
 from PyPDF2 import PdfReader
@@ -219,45 +221,89 @@ def extract_text_from_epub(file_content: bytes) -> str:
 
             # Parse the root file to find all documents
             with z.open(rootfile_path) as root_file:
-                root_content = root_file.read()
-                root = ET.fromstring(root_content)
+                #root_content = root_file.read()
+                result = ""
+                soup = BeautifulSoup(root_file.read(), 'lxml')
+                for text_object in soup.find_all(text=True):
+                    result += "\n" + text_object.text
 
-                # Get the manifest items (all content files)
-                manifest = root.find(
-                    './/{http://www.idpf.org/2007/opf}manifest'
-                )
-                items = {
-                    item.attrib['id']: item.attrib['href']
-                    for item in manifest.findall(
-                        '{http://www.idpf.org/2007/opf}item'
-                    )
-                }
-
-                # Find the spine (reading order)
-                spine = root.find('.//{http://www.idpf.org/2007/opf}spine')
-                itemrefs = spine.findall('{http://www.idpf.org/2007/opf}itemref')
-
-                text_parts = []
-
-                for itemref in itemrefs:
-                    item_id = itemref.attrib['idref']
-                    item_path = items[item_id]
-
-                    # Resolve path relative to root file
-                    full_path = os.path.join(
-                        os.path.dirname(rootfile_path),
-                        item_path
-                    )
-
-                    # Read and parse each content file
-                    with z.open(full_path) as content_file:
-                        content = content_file.read()
-                        soup = BeautifulSoup(content, 'html.parser')
-                        text_parts.append(soup.get_text())
-
-                return '\n\n'.join(text_parts)
+                return result
     except Exception as e:
         raise ValueError(f"Failed to parse EPUB file: {str(e)}")
+
+
+def extract_text_from_docx(file_content: bytes) -> str:
+    """Extract text from DOCX (Microsoft Word) format."""
+    try:
+        docx_file = io.BytesIO(file_content)
+        doc = docx.Document(docx_file)
+        result = []
+        for para in doc.paragraphs:
+            result.append(para.text)
+        return '\n'.join(result)
+    except Exception as e:
+        raise ValueError(f"Failed to parse DOC(X) file: {str(e)}")
+
+
+def extract_epub_text_with_metadata(file_content: bytes, output_folder=None):
+    """
+    Extract text and metadata from an EPUB file.
+
+    Args:
+        epub_path (str): Path to the EPUB file
+        output_folder (str, optional): Folder to save extracted text. If None, returns as dict.
+
+    Returns:
+        dict or None: If output_folder is None, returns dictionary with text and metadata.
+                      Otherwise saves files and returns None.
+    """
+    # Read the EPUB file
+    book = epub.read_epub(io.BytesIO(file_content))
+
+    # Initialize result dictionary
+    result = {
+        'book_title': book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else 'Untitled',
+        'author': book.get_metadata('DC', 'creator')[0][0] if book.get_metadata('DC', 'creator') else 'Unknown',
+        'chapters': []
+    }
+
+    # Process each document in the EPUB
+    for item in book.get_items():
+        if item.get_type() == ebooklib.ITEM_DOCUMENT:
+            # Parse the HTML content
+            soup = BeautifulSoup(item.get_content(), 'html.parser')
+
+            # Extract title (try different methods)
+            title = ""
+            if soup.title:
+                title = soup.title.string
+            elif soup.find('h1'):
+                title = soup.find('h1').get_text()
+
+            # Clean up the text
+            text = soup.get_text()
+            text = ' '.join(text.split())  # Remove excessive whitespace
+
+            # Add to results
+            chapter_data = {
+                'file_name': item.get_name(),
+                'title': title.strip(),
+                'content': text
+            }
+            result['chapters'].append(chapter_data)
+
+            # If output folder specified, save to file
+            if output_folder:
+                os.makedirs(output_folder, exist_ok=True)
+                base_name = os.path.splitext(os.path.basename(item.get_name()))[0]
+                output_path = os.path.join(output_folder, f"{base_name}.txt")
+
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(f"Title: {title}\n\n")
+                    f.write(text)
+
+    if not output_folder:
+        return result
 
 
 # async def extract_text_from_pdf(file) -> str:
