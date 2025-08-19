@@ -2,7 +2,7 @@ import io
 
 from PyPDF2 import PdfReader
 
-from util.util import clean_text
+from util import clean_text
 
 
 async def extract_text_from_pdf(file) -> str:
