@@ -6,14 +6,8 @@ type ChatMsg = {
   role: "user" | "assistant" | "error" | "loading";
   text: string;
   sources?: Array<{ text: string; metadata?: Record<string, any> }>;
-};
-
-type UploadItem = {
-  id: string;
-  name: string;
-  size: number;
-  status: "uploading" | "ok" | "error";
-  error?: string;
+  fileStatus?: "uploading" | "ok" | "error"; // добавлено
+  fileError?: string; // для ошибок
 };
 
 const ASK_URL = "http://localhost:8081/api/chat/semantics";
@@ -27,7 +21,6 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [drag, setDrag] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [showFileLimitModal, setShowFileLimitModal] = useState(false);
@@ -49,7 +42,7 @@ export default function App() {
 
   useEffect(() => {
     chatRef.current?.lastElementChild?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, uploads]);
+  }, [messages]);
 
   useEffect(() => {
     fetch("http://localhost:8081/chats")
@@ -144,26 +137,26 @@ export default function App() {
   const uploadFiles = useCallback(
     async (files: FileList | File[]) => {
       const arr = Array.from(files);
-      const totalFiles = uploads.length + arr.length;
+      const totalFiles = messages.filter(m => m.role === "user").length + arr.length;
       const totalSize =
-        uploads.reduce((s, u) => s + u.size, 0) + arr.reduce((s, f) => s + f.size, 0);
+        messages
+          .filter(m => m.role === "user")
+          .reduce((s, m) => s + (m.text.length || 0), 0) + arr.reduce((s, f) => s + f.size, 0);
 
       if (totalFiles > MAX_FILES || totalSize > MAX_TOTAL_SIZE) {
         setShowFileLimitModal(true);
         return;
       }
 
-      const items: UploadItem[] = arr.map(f => ({
-        id: crypto.randomUUID(),
-        name: f.name,
-        size: f.size,
-        status: "uploading",
-      }));
-      setUploads(prev => [...prev, ...items]);
-
       for (let i = 0; i < arr.length; i++) {
         const f = arr[i];
-        const currentId = items[i].id;
+        const fileId = crypto.randomUUID();
+
+        // добавляем как сообщение пользователя с текстом "загрузка..."
+        setMessages(prev => [
+          ...prev,
+          { id: fileId, role: "user", text: `📄 ${f.name} (загрузка...)`,  fileStatus: "uploading" },
+        ]);
 
         try {
           const form = new FormData();
@@ -171,7 +164,8 @@ export default function App() {
 
           const res = await fetch(UPLOAD_URL, { method: "POST", body: form });
           if (!res.ok) {
-            const errorMsg = res.status === 400 ? "Неподдерживаемый формат" : `Ошибка: HTTP ${res.status}`;
+            const errorMsg =
+              res.status === 400 ? "Неподдерживаемый формат" : `Ошибка: HTTP ${res.status}`;
             throw new Error(errorMsg);
           }
 
@@ -180,21 +174,23 @@ export default function App() {
             throw new Error(data?.message || "Ошибка загрузки");
           }
 
-          setUploads(prev =>
-            prev.map(u => (u.id === currentId ? { ...u, status: "ok" } : u))
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === fileId ? { ...m, text: `${f.name}`, fileStatus: "ok"  } : m
+            )
           );
         } catch (e: any) {
-          setUploads(prev =>
-            prev.map(u =>
-              u.id === currentId
-                ? { ...u, status: "error", error: e?.message ?? String(e) }
-                : u
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === fileId
+                ? { ...m, text: `${f.name}`, fileStatus: "error" }
+                : m
             )
           );
         }
       }
     },
-    [uploads]
+    [messages]
   );
 
   const onFilesPicked = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -236,7 +232,6 @@ export default function App() {
 
   const resetChat = () => {
     setMessages([]);
-    setUploads([]);
   };
 
   return (
@@ -265,7 +260,20 @@ export default function App() {
             key={m.id}
             className={`msg ${m.role} ${m.role === "user" ? "right" : "left"}`}
           >
-            {m.role === "loading" ? <TypingIndicator /> : m.text}
+            {m.role === "loading" ? (
+              <TypingIndicator />
+            ) : m.fileStatus ? (
+              <div className="file">
+                <div>📄 {m.text}</div>
+                <div className={`status ${m.fileStatus}`}>
+                  {m.fileStatus === "uploading" && "Загрузка…"}
+                  {m.fileStatus === "ok" && "✓ Загружено"}
+                  {m.fileStatus === "error" && `Ошибка: ${m.fileError}`}
+                </div>
+              </div>
+            ) : (
+              m.text
+            )}
             {m.sources && (
               <div className="sources">
                 {m.sources.slice(0, 3).map((s, i) => {
@@ -282,20 +290,7 @@ export default function App() {
             )}
           </div>
         ))}
-        {uploads.length > 0 && (
-          <div className="msg user right">
-            {uploads.map(f => (
-              <div key={f.id} className="file">
-                <div>📄 {f.name}</div>
-                <div className={`status ${f.status}`}>
-                  {f.status === "uploading" && "Загрузка…"}
-                  {f.status === "ok" && "✓ Загружено"}
-                  {f.status === "error" && `Ошибка: ${f.error}`}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+
       </div>
 
       <div className="footer">
@@ -303,14 +298,14 @@ export default function App() {
           Новый чат
         </button>
         <div className="input-row">
-          <button
+          {/* <button
             type="button"
             className={`btn quick-search ${quickSearch ? "active" : ""}`}
             onClick={() => setQuickSearch(prev => !prev)}
             title="Быстрый поиск"
           >
             ⚡
-          </button>
+          </button> */}
           <form className="form" onSubmit={onSubmit}>
             <input
               className="input"
@@ -322,6 +317,13 @@ export default function App() {
             <button type="button" className="btn" onClick={openPicker} disabled={busy}>
               📎
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              onChange={onFilesPicked}
+            />
             <button type="submit" className="btn primary" disabled={busy}>
               ➤
             </button>
@@ -382,7 +384,6 @@ export default function App() {
                 className="btn primary"
                 onClick={() => {
                   setMessages([]);
-                  setUploads([]);
                   setShowLimitModal(false);
                 }}
               >
