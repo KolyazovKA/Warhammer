@@ -1,6 +1,6 @@
-from main import app
+from fastapi import APIRouter
 
-
-@app.get("/test")
+router = APIRouter()
+@router.get("/test")
 async def debug_function_1():
     return {"text": "text"}

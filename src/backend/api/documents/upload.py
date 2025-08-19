@@ -1,11 +1,13 @@
-from fastapi import UploadFile, File, HTTPException
+from fastapi import UploadFile, File, HTTPException, APIRouter
 
-from main import app, collection
-from util.util import extract_text_from_pdf, extract_text_from_fb2, extract_text_from_epub, extract_text_from_docx, \
-    smart_chunking
+from parsers.docx_parser import extract_text_from_docx
+from parsers.fb2 import extract_text_from_fb2
+from parsers.simple_pdf import extract_text_from_pdf
+from util.util import smart_chunking
 
 
-@app.post("/api/documents/upload")
+router = APIRouter()
+@router.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     try:
         file_content = await file.read()

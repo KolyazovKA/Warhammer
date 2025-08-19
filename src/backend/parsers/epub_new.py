@@ -6,7 +6,8 @@ from bs4 import BeautifulSoup
 from ebooklib import epub
 
 
-def extract_epub_text_with_metadata(file_content: bytes, output_folder=None):
+# extract_epub_text_with_metadata
+def extract_text_from_epub(file_content: bytes, output_folder=None):
     """
     Extract text and metadata from an EPUB file.
 

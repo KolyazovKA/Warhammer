@@ -2,11 +2,10 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 import os
-from chromadb import PersistentClient
 from starlette.middleware.cors import CORSMiddleware
 
 from config import Config
-from embeddings.deepseek import DeepSeekEmbeddingFunction
+from persistence.chroma import Chroma
 
 os.environ.update({"DEEPSEEK_API_KEY": "sk-011533b41d13463d98a3e558896665b8"})
 
@@ -20,24 +19,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from api.chat.semantics import router as chat_router
+from api.documents.upload import router as upload_router
 
+app.include_router(chat_router)
+app.include_router(upload_router)
 
-# ChromaDB
-client = PersistentClient(path="choma_db")
-
-embedding_func = DeepSeekEmbeddingFunction(api_key=Config.DEEPSEEK_API_KEY)
-
-collection = client.get_or_create_collection(
-    name="choma_collection",
-    embedding_function=embedding_func,
-)
 class Query(BaseModel):
     question: str
 
-
 @app.post("/search")
 async def search_chroma(query: Query):
-    text_only_search_results = collection.get(
+    text_only_search_results = Chroma.collection.get(
         where_document={"$contains": query.question},
     )
     return text_only_search_results
@@ -45,6 +38,7 @@ async def search_chroma(query: Query):
 
 
 if __name__ == "__main__":
+    Chroma.initialize()
     uvicorn.run(
         app="main:app",
         host="0.0.0.0",

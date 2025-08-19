@@ -1,7 +1,9 @@
-from fastapi import Query, requests, HTTPException
+import requests
+from fastapi import HTTPException, APIRouter
+from pydantic import BaseModel
 
 from config import Config
-from main import collection, app
+from persistence.chroma import Chroma
 
 """
 POST /api/documents/upload – загрузка документов
@@ -12,8 +14,12 @@ POST /api/chat/semantics – семантический поиск.
 """
 
 
-@app.post("/api/chat/semantics")
-async def ask_choma(query: Query) -> SemanticsResponseSchema:
+class Query(BaseModel):
+    question: str
+
+router = APIRouter()
+@router.post("/api/chat/semantics")
+async def ask_choma(query: Query):
     """
 
     Args:
@@ -23,7 +29,7 @@ async def ask_choma(query: Query) -> SemanticsResponseSchema:
 
     """
     # 1. Search in ChromaDB with metadata filtering if needed
-    results = collection.query(
+    results = Chroma.collection.query(
         query_texts=[query.question],
         n_results=15,
     )
