@@ -3,6 +3,7 @@ from fastapi import UploadFile, File, HTTPException, APIRouter
 from parsers.docx_parser import extract_text_from_docx
 from parsers.fb2 import extract_text_from_fb2
 from parsers.simple_pdf import extract_text_from_pdf
+from persistence.chroma import Chroma
 from util import smart_chunking
 
 
@@ -45,7 +46,7 @@ async def upload_document(file: UploadFile = File(...)):
             ids.append(f"{file.filename}_chunk_{i}")
 
         # Store in ChromaDB
-        collection.add(
+        Chroma.collection.add(
             documents=documents,
             metadatas=metadatas,
             ids=ids
