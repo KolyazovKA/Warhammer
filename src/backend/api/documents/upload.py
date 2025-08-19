@@ -1,3 +1,6 @@
+import logging
+import os
+
 from fastapi import UploadFile, File, HTTPException, APIRouter
 
 from parsers.docx_parser import extract_text_from_docx
@@ -8,6 +11,23 @@ from util import smart_chunking
 
 
 router = APIRouter()
+
+
+def _save_file_in_storage(filename: str, file_content: bytes):
+    try:
+        folder_path = 'src/backend/files'
+        if not os.path.exists(folder_path):
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+        file_path = os.path.join(folder_path, filename)
+        # Save bytes to file
+        with open(file_path, 'wb') as file:
+            file.write(file_content)
+
+    except Exception as e:
+        logging.error(e)
+
+
 @router.post("/api/documents/upload")
 async def upload_document(file: UploadFile = File(...)):
     try:
@@ -44,6 +64,8 @@ async def upload_document(file: UploadFile = File(...)):
                 **chunk['metadata']
             })
             ids.append(f"{file.filename}_chunk_{i}")
+
+        _save_file_in_storage(filename=file.filename, file_content=file_content)
 
         # Store in ChromaDB
         Chroma.collection.add(
