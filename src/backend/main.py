@@ -112,7 +112,12 @@ async def ask_choma(query: Query):
     except Exception as e:
         print(e)
         print(resp)
-        return {"error": "Failed to query DeepSeek API"}
+        raise HTTPException(
+            status_code=400,
+            detail=f"""Failed to query DeepSeek API: {str(e)}
+Response: {str(resp)}
+"""
+        )
 
     answer = resp.json()["choices"][0]["message"]["content"]
 
@@ -224,7 +229,10 @@ async def upload_document(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
 
 
 if __name__ == "__main__":
