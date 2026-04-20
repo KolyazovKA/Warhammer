@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 
-class TextSourceItem:
+class TextSourceItem(BaseModel):
     text: str
     metadata: dict
 

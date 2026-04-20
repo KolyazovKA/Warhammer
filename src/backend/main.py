@@ -1,70 +1,76 @@
-import uvicorn
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+import logging
 import os
-import shutil
-from typing import Dict
-from chromadb import PersistentClient
+from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import quote
+from typing import Dict
+
+import httpx
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 from config import Config
 from persistence.chroma import Chroma
 
-os.environ.update({"DEEPSEEK_API_KEY": "sk-011533b41d13463d98a3e558896665b8"})
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(title="DeepSeek RAG over Choma")
+_FILES_DIR = Path(__file__).parent / "files"
 
-# Set up CORS
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Config.validate()
+    Chroma.initialize()
+    _FILES_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("ChromaDB initialized. Files directory: %s", _FILES_DIR)
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        app.state.http_client = client
+        yield
+
+
+app = FastAPI(title="DeepSeek RAG over Choma", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["http://localhost:8080", "http://localhost:8082"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
 from api.chat.semantics import router as chat_router
 from api.documents.upload import router as upload_router
 
 app.include_router(chat_router)
 app.include_router(upload_router)
-# Монтируем статическую директорию для доступа к файлам
-app.mount("/files", StaticFiles(directory="src/backend/files"), name="files")
 
-class Query(BaseModel):
-    question: str
+app.mount("/files", StaticFiles(directory=str(_FILES_DIR)), name="files")
 
-@app.post("/search")
-async def search_chroma(query: Query):
-    text_only_search_results = Chroma.collection.get(
-        where_document={"$contains": query.question},
-    )
-    return text_only_search_results
 
 @app.get("/get_books")
 async def get_books() -> Dict[str, str]:
-    # Путь к целевой папке
-    folder_path = 'src/backend/files'
-    
-    # Проверяем существование папки
-    if not os.path.exists(folder_path):
-        raise HTTPException(status_code=404, detail="Folder not found")
-    
-    # Собираем список файлов (игнорируем директории)
-    files = {}
-    for filename in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, filename)
-        if os.path.isfile(file_path):
-            # Кодируем имя файла для URL
-            encoded_filename = quote(filename)
-            files[filename] = f"http://localhost:8081/files/{encoded_filename}"
-    
+    if not _FILES_DIR.exists():
+        raise HTTPException(status_code=404, detail="Files folder not found")
+
+    files = {
+        filename: f"{Config.BASE_URL}/files/{quote(filename)}"
+        for filename in os.listdir(_FILES_DIR)
+        if (_FILES_DIR / filename).is_file()
+    }
     return JSONResponse(content=files)
 
+
 if __name__ == "__main__":
-    Chroma.initialize()
     uvicorn.run(
         app="main:app",
         host="0.0.0.0",
